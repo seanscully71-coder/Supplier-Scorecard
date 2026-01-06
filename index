@@ -329,6 +329,11 @@
             color: var(--danger);
         }
 
+        .status-badge.too-early {
+            background: rgba(255, 107, 53, 0.2);
+            color: var(--warning);
+        }
+
         .progress-bar {
             width: 100%;
             height: 8px;
@@ -507,6 +512,7 @@
             </div>
 
             <div class="filter-section">
+                <h3 class="chart-title" style="margin-bottom: 1rem;">Filters & Tolerance Settings</h3>
                 <div class="filter-grid">
                     <div class="filter-group">
                         <label class="filter-label">Supplier</label>
@@ -521,6 +527,31 @@
                             <option value="Filled">Filled</option>
                             <option value="Open">Open</option>
                         </select>
+                    </div>
+                    <div class="filter-group">
+                        <label class="filter-label">Late Tolerance (Days)</label>
+                        <input type="number" id="lateTolerance" value="0" min="0" max="30" 
+                               onchange="updateTolerance()" 
+                               style="background: var(--bg-dark); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem; font-size: 0.9rem; width: 100%;">
+                        <small style="color: var(--text-secondary); font-size: 0.75rem; margin-top: 0.25rem; display: block;">
+                            Grace period after due date
+                        </small>
+                    </div>
+                    <div class="filter-group">
+                        <label class="filter-label">Early Tolerance (Days)</label>
+                        <input type="number" id="earlyTolerance" value="0" min="0" max="30" 
+                               onchange="updateTolerance()" 
+                               style="background: var(--bg-dark); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem; font-size: 0.9rem; width: 100%;">
+                        <small style="color: var(--text-secondary); font-size: 0.75rem; margin-top: 0.25rem; display: block;">
+                            Warning if delivered too early
+                        </small>
+                    </div>
+                </div>
+                <div style="margin-top: 1rem; padding: 1rem; background: rgba(0, 217, 184, 0.05); border-radius: 8px; border-left: 3px solid var(--accent);">
+                    <div style="font-size: 0.85rem; color: var(--text-secondary);">
+                        <strong style="color: var(--accent);">Current Settings:</strong> 
+                        Deliveries up to <span id="lateToleranceDisplay" style="color: var(--accent); font-weight: 600;">0</span> days after due date are considered on-time.
+                        <span id="earlyWarningDisplay"></span>
                     </div>
                 </div>
             </div>
@@ -596,6 +627,8 @@
         let charts = {};
 
         const OTD_TARGET = 98.5;
+        let lateTolerance = 0;
+        let earlyTolerance = 0;
 
         document.getElementById('fileInput').addEventListener('change', handleFileUpload);
 
@@ -626,11 +659,17 @@
                 
                 let daysLate = 0;
                 let isLate = false;
+                let isTooEarly = false;
                 
                 if (dueDate && receiptDate) {
                     const diffTime = receiptDate - dueDate;
                     daysLate = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                    isLate = daysLate > 0;
+                    
+                    // Apply tolerance: only late if beyond tolerance
+                    isLate = daysLate > lateTolerance;
+                    
+                    // Check if too early (negative days means early)
+                    isTooEarly = daysLate < -earlyTolerance;
                 }
                 
                 return {
@@ -643,6 +682,7 @@
                     receiptDate: receiptDate,
                     daysLate: daysLate,
                     isLate: isLate,
+                    isTooEarly: isTooEarly,
                     status: row['Line Status'],
                     received: row['Received']
                 };
@@ -703,6 +743,38 @@
             });
             
             updateDashboard();
+        }
+
+        function updateTolerance() {
+            lateTolerance = parseInt(document.getElementById('lateTolerance').value) || 0;
+            earlyTolerance = parseInt(document.getElementById('earlyTolerance').value) || 0;
+            
+            // Update display text
+            document.getElementById('lateToleranceDisplay').textContent = lateTolerance;
+            
+            const earlyWarningDisplay = document.getElementById('earlyWarningDisplay');
+            if (earlyTolerance > 0) {
+                earlyWarningDisplay.textContent = ` Deliveries more than ${earlyTolerance} days early will be flagged.`;
+                earlyWarningDisplay.style.display = 'inline';
+            } else {
+                earlyWarningDisplay.style.display = 'none';
+            }
+            
+            // Recalculate all data with new tolerance
+            allData = allData.map(row => {
+                const daysLate = row.daysLate;
+                const isLate = daysLate > lateTolerance;
+                const isTooEarly = daysLate < -earlyTolerance;
+                
+                return {
+                    ...row,
+                    isLate: isLate,
+                    isTooEarly: isTooEarly
+                };
+            });
+            
+            // Reapply filters and update dashboard
+            filterData();
         }
 
         function updateDashboard() {
@@ -878,8 +950,29 @@
                 const tr = document.createElement('tr');
                 
                 const daysLateText = row.daysLate > 0 ? `+${row.daysLate}` : row.daysLate;
-                const statusClass = row.isLate ? 'late' : 'on-time';
-                const statusText = row.isLate ? 'Late' : 'On-Time';
+                
+                // Determine status based on tolerance
+                let statusClass, statusText;
+                if (row.isTooEarly) {
+                    statusClass = 'too-early';
+                    statusText = 'Too Early';
+                } else if (row.isLate) {
+                    statusClass = 'late';
+                    statusText = 'Late';
+                } else {
+                    statusClass = 'on-time';
+                    statusText = 'On-Time';
+                }
+                
+                // Color the days late/early text
+                let daysColor;
+                if (row.isTooEarly) {
+                    daysColor = 'var(--warning)';
+                } else if (row.isLate) {
+                    daysColor = 'var(--danger)';
+                } else {
+                    daysColor = 'var(--success)';
+                }
                 
                 tr.innerHTML = `
                     <td>${row.supplier}</td>
@@ -888,7 +981,7 @@
                     <td>${row.item || '-'}</td>
                     <td>${row.dueDate ? row.dueDate.toLocaleDateString() : '-'}</td>
                     <td>${row.receiptDate ? row.receiptDate.toLocaleDateString() : '-'}</td>
-                    <td style="color: ${row.isLate ? 'var(--danger)' : 'var(--success)'}">${daysLateText}</td>
+                    <td style="color: ${daysColor}">${daysLateText}</td>
                     <td><span class="status-badge ${statusClass}">${statusText}</span></td>
                 `;
                 
@@ -906,6 +999,7 @@
             const totalLines = filteredData.length;
             const lateLines = filteredData.filter(row => row.isLate).length;
             const onTimeLines = totalLines - lateLines;
+            const tooEarlyLines = filteredData.filter(row => row.isTooEarly).length;
             const otdRate = totalLines > 0 ? ((onTimeLines / totalLines) * 100).toFixed(2) : 0;
             
             let csvContent = "Supplier Scorecard Report\n\n";
@@ -913,17 +1007,29 @@
             csvContent += `Total Lines,${totalLines}\n`;
             csvContent += `On-Time Lines,${onTimeLines}\n`;
             csvContent += `Late Lines,${lateLines}\n`;
+            csvContent += `Too Early Lines,${tooEarlyLines}\n`;
             csvContent += `OTD Rate,${otdRate}%\n`;
-            csvContent += `Target,${OTD_TARGET}%\n\n`;
+            csvContent += `Target,${OTD_TARGET}%\n`;
+            csvContent += `Late Tolerance (Days),${lateTolerance}\n`;
+            csvContent += `Early Tolerance (Days),${earlyTolerance}\n\n`;
             
             csvContent += "Detailed Line Items\n";
             csvContent += "Supplier,PO Number,Line,Item,Due Date,Receipt Date,Days Late,Status\n";
             
             filteredData.forEach(row => {
+                let status;
+                if (row.isTooEarly) {
+                    status = 'Too Early';
+                } else if (row.isLate) {
+                    status = 'Late';
+                } else {
+                    status = 'On-Time';
+                }
+                
                 csvContent += `"${row.supplier}",${row.po},${row.line},"${row.item || ''}",`;
                 csvContent += `${row.dueDate ? row.dueDate.toLocaleDateString() : ''},`;
                 csvContent += `${row.receiptDate ? row.receiptDate.toLocaleDateString() : ''},`;
-                csvContent += `${row.daysLate},${row.isLate ? 'Late' : 'On-Time'}\n`;
+                csvContent += `${row.daysLate},${status}\n`;
             });
             
             const blob = new Blob([csvContent], { type: 'text/csv' });
