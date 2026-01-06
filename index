@@ -250,6 +250,10 @@
             .chart-section {
                 grid-template-columns: 1fr;
             }
+            
+            .chart-card {
+                grid-column: span 1 !important;
+            }
         }
 
         .chart-card {
@@ -594,6 +598,11 @@
                 </div>
 
                 <div class="chart-card">
+                    <h3 class="chart-title">Monthly OTD Trend</h3>
+                    <canvas id="monthlyChart"></canvas>
+                </div>
+
+                <div class="chart-card" style="grid-column: span 2;">
                     <h3 class="chart-title">Top Suppliers by OTD</h3>
                     <canvas id="supplierChart"></canvas>
                 </div>
@@ -834,6 +843,7 @@
             const lateLines = filteredData.filter(row => row.isLate).length;
             const onTimeLines = totalLines - lateLines;
             
+            // Performance Overview Chart (Doughnut)
             if (charts.performance) {
                 charts.performance.destroy();
             }
@@ -869,6 +879,85 @@
                 }
             });
             
+            // Monthly OTD Trend Chart
+            const monthlyData = calculateMonthlyOTD();
+            
+            if (charts.monthly) {
+                charts.monthly.destroy();
+            }
+            
+            const ctx2 = document.getElementById('monthlyChart').getContext('2d');
+            charts.monthly = new Chart(ctx2, {
+                type: 'line',
+                data: {
+                    labels: monthlyData.labels,
+                    datasets: [{
+                        label: 'OTD %',
+                        data: monthlyData.otdRates,
+                        borderColor: '#00D9B8',
+                        backgroundColor: 'rgba(0, 217, 184, 0.1)',
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 5,
+                        pointHoverRadius: 7,
+                        pointBackgroundColor: '#00D9B8',
+                        pointBorderColor: '#0D1117',
+                        pointBorderWidth: 2
+                    }, {
+                        label: 'Target (98.5%)',
+                        data: monthlyData.labels.map(() => OTD_TARGET),
+                        borderColor: '#FF6B35',
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        fill: false,
+                        pointRadius: 0,
+                        pointHoverRadius: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            ticks: {
+                                color: '#8B949E',
+                                callback: function(value) {
+                                    return value + '%';
+                                }
+                            },
+                            grid: {
+                                color: '#30363D'
+                            }
+                        },
+                        x: {
+                            ticks: {
+                                color: '#8B949E'
+                            },
+                            grid: {
+                                display: false
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                color: '#E6EDF3',
+                                font: {
+                                    size: 12,
+                                    family: 'Work Sans'
+                                },
+                                padding: 15
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // Top Suppliers Chart
             const supplierStats = {};
             allData.forEach(row => {
                 if (!supplierStats[row.supplier]) {
@@ -892,8 +981,8 @@
                 charts.supplier.destroy();
             }
             
-            const ctx2 = document.getElementById('supplierChart').getContext('2d');
-            charts.supplier = new Chart(ctx2, {
+            const ctx3 = document.getElementById('supplierChart').getContext('2d');
+            charts.supplier = new Chart(ctx3, {
                 type: 'bar',
                 data: {
                     labels: supplierData.map(s => s.name.substring(0, 20)),
@@ -938,6 +1027,43 @@
                     }
                 }
             });
+        }
+
+        function calculateMonthlyOTD() {
+            // Group data by month based on receipt date
+            const monthlyStats = {};
+            
+            filteredData.forEach(row => {
+                if (row.receiptDate) {
+                    const monthKey = `${row.receiptDate.getFullYear()}-${String(row.receiptDate.getMonth() + 1).padStart(2, '0')}`;
+                    
+                    if (!monthlyStats[monthKey]) {
+                        monthlyStats[monthKey] = {
+                            total: 0,
+                            onTime: 0,
+                            date: new Date(row.receiptDate.getFullYear(), row.receiptDate.getMonth(), 1)
+                        };
+                    }
+                    
+                    monthlyStats[monthKey].total++;
+                    if (!row.isLate) {
+                        monthlyStats[monthKey].onTime++;
+                    }
+                }
+            });
+            
+            // Sort by date and calculate OTD rates
+            const sortedMonths = Object.entries(monthlyStats)
+                .sort((a, b) => a[1].date - b[1].date)
+                .map(([key, stats]) => ({
+                    label: stats.date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' }),
+                    otdRate: ((stats.onTime / stats.total) * 100).toFixed(1)
+                }));
+            
+            return {
+                labels: sortedMonths.map(m => m.label),
+                otdRates: sortedMonths.map(m => parseFloat(m.otdRate))
+            };
         }
 
         function updateTable() {
